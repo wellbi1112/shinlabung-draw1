@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <title>참가자 추첨기</title>
+  <style>
+    body {
+      font-family: sans-serif;
+      text-align: center;
+      padding: 30px;
+      background: #f7f7f7;
+    }
+
+    #box-container {
+      display: grid;
+      grid-template-columns: repeat(4, 100px);
+      gap: 15px;
+      justify-content: center;
+      margin-bottom: 30px;
+    }
+
+    .box {
+      width: 100px;
+      height: 100px;
+      background-color: white;
+      border: 2px solid #aaa;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: bold;
+      font-size: 16px;
+      transition: all 0.3s;
+    }
+
+    .highlight {
+      background-color: gold;
+      border-color: orange;
+      color: black;
+      animation: bounce 0.6s infinite alternate;
+    }
+
+    @keyframes bounce {
+      0% { transform: scale(1); }
+      100% { transform: scale(1.1); }
+    }
+
+    button {
+      padding: 10px 20px;
+      font-size: 18px;
+      cursor: pointer;
+      margin: 5px;
+    }
+
+    #results {
+      margin-top: 30px;
+      font-size: 18px;
+    }
+
+    select, textarea {
+      font-size: 16px;
+      padding: 5px 10px;
+      margin-bottom: 20px;
+    }
+
+    textarea {
+      width: 300px;
+      height: 100px;
+    }
+  </style>
+</head>
+<body>
+  <h1>🎁 박스 랜덤 추첨기</h1>
+
+  <label>CSV 참가자 불러오기: <input type="file" id="csvInput" accept=".csv" /></label><br><br>
+
+  <label>직접 참가자 입력:<br>
+    <textarea id="manualInput" placeholder="한 줄에 한 명씩 입력"></textarea><br>
+    <button onclick="applyManualInput()">입력 적용</button>
+  </label><br>
+
+  <label>추첨 인원 수:
+    <select id="drawCount"></select>
+  </label>
+
+  <div id="box-container"></div>
+  <button onclick="startDraw()">🎲 추첨 시작</button>
+  <button onclick="downloadResults()">📥 결과 다운로드 (CSV)</button>
+  <button onclick="downloadResultsJson()">📥 결과 다운로드 (JSON)</button>
+  <button onclick="clearHistory()">🗑️ 추첨 이력 초기화</button>
+
+  <div id="results">
+    <h3>📋 당첨자 목록</h3>
+    <ul id="winnerList"></ul>
+  </div>
+
+  <script>
+    let names = [];
+    let remaining = [];
+    let history = JSON.parse(localStorage.getItem('drawHistory') || '[]');
+    const container = document.getElementById("box-container");
+    const winnerList = document.getElementById("winnerList");
+
+    function updateDrawOptions() {
+      const select = document.getElementById("drawCount");
+      select.innerHTML = "";
+      for (let i = 1; i <= 12; i++) {
+        const opt = document.createElement("option");
+        opt.value = i;
+        opt.textContent = `${i}명`;
+        select.appendChild(opt);
+      }
+    }
+
+    updateDrawOptions();
+    loadHistory();
+
+    document.getElementById("csvInput").addEventListener("change", function(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = function(e) {
+        const text = e.target.result;
+        names = text.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+        remaining = [...names];
+        localStorage.setItem('participants', JSON.stringify(names));
+        renderBoxes();
+      };
+      reader.readAsText(file);
+    });
+
+    function applyManualInput() {
+      const input = document.getElementById("manualInput").value;
+      names = input.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+      remaining = [...names];
+      localStorage.setItem('participants', JSON.stringify(names));
+      renderBoxes();
+    }
+
+    function renderBoxes() {
+      container.innerHTML = "";
+      remaining.forEach(name => {
+        const div = document.createElement("div");
+        div.className = "box";
+        div.textContent = name;
+        container.appendChild(div);
+      });
+    }
+
+    function startDraw() {
+      const count = parseInt(document.getElementById("drawCount").value);
+      if (remaining.length < count) {
+        alert("남은 인원이 부족합니다!");
+        return;
+      }
+
+      const boxes = Array.from(document.querySelectorAll(".box"));
+      boxes.forEach(box => box.classList.remove("highlight"));
+
+      let current = 0;
+      let steps = 0;
+      const maxSteps = 20;
+      const interval = setInterval(() => {
+        boxes.forEach(box => box.classList.remove("highlight"));
+        boxes[current].classList.add("highlight");
+        current = (current + 1) % boxes.length;
+        steps++;
+        if (steps >= maxSteps) {
+          clearInterval(interval);
+          doDraw(count);
+          playSound();
+        }
+      }, 100);
+    }
+
+    function doDraw(count) {
+      const selected = [];
+      while (selected.length < count) {
+        const i = Math.floor(Math.random() * remaining.length);
+        const chosen = remaining[i];
+        if (!selected.includes(chosen)) {
+          selected.push(chosen);
+          remaining.splice(i, 1);
+        }
+      }
+      const boxes = document.querySelectorAll(".box");
+      boxes.forEach(box => {
+        if (selected.includes(box.textContent)) {
+          box.classList.add("highlight");
+        }
+      });
+      selected.forEach(name => {
+        const li = document.createElement("li");
+        li.textContent = name;
+        winnerList.appendChild(li);
+      });
+      history.push(...selected);
+      localStorage.setItem('drawHistory', JSON.stringify(history));
+      renderBoxes();
+    }
+
+    function loadHistory() {
+      history.forEach(name => {
+        const li = document.createElement("li");
+        li.textContent = name;
+        winnerList.appendChild(li);
+      });
+    }
+
+    function downloadResults() {
+      const blob = new Blob([
+        history.map(name => name + "\n").join("")
+      ], { type: "text/csv;charset=utf-8;" });
+      const link = document.createElement("a");
+      link.setAttribute("href", URL.createObjectURL(blob));
+      link.setAttribute("download", "draw_results.csv");
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    }
+
+    function downloadResultsJson() {
+      const blob = new Blob([JSON.stringify(history, null, 2)], { type: "application/json" });
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(blob);
+      link.download = "draw_results.json";
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    }
+
+    function clearHistory() {
+      if (confirm("추첨 이력을 모두 초기화할까요?")) {
+        history = [];
+        localStorage.removeItem('drawHistory');
+        winnerList.innerHTML = "";
+      }
+    }
+
+    function playSound() {
+      const audio = new Audio("https://actions.google.com/sounds/v1/cartoon/clang_and_wobble.ogg");
+      audio.play();
+    }
+  </script>
+</body>
+</html>
